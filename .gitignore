@@ -23,3 +23,8 @@ Thumbs.db
 # Environment
 .env
 .env.*
+
+# Terraform
+terraform.tfvars
+*.tfstate
+*.tfstate.*

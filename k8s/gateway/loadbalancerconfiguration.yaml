@@ -1,0 +1,12 @@
+apiVersion: gateway.k8s.aws/v1
+kind: LoadBalancerConfiguration
+
+metadata:
+  name: taskflow-alb
+  namespace: taskflow
+
+spec:
+  scheme: internet-facing
+  listenerConfigurations:
+    - protocolPort: HTTPS:443
+      defaultCertificate: arn:aws:acm:ap-south-1:372951851996:certificate/8ce98ad6-0de9-41a2-8414-203bda17fb0d
