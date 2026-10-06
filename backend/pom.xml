@@ -1,104 +1,354 @@
 <?xml version="1.0" encoding="UTF-8"?>
+
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
-         https://maven.apache.org/xsd/maven-4.0.0.xsd">
+         xsi:schemaLocation="
+            http://maven.apache.org/POM/4.0.0
+            https://maven.apache.org/xsd/maven-4.0.0.xsd">
 
+    <!-- Maven model version -->
     <modelVersion>4.0.0</modelVersion>
+
+
+    <!-- ================================================================
+         SPRING BOOT PARENT
+         ================================================================
+
+         The Spring Boot parent provides:
+         - Dependency version management
+         - Maven plugin defaults
+         - Java compatibility configuration
+         - Sensible Maven defaults
+         ================================================================ -->
 
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.5.3</version>
+        <version>4.1.1</version>
         <relativePath/>
     </parent>
+
+
+    <!-- ================================================================
+         PROJECT INFORMATION
+         ================================================================ -->
 
     <groupId>com.taskflow</groupId>
     <artifactId>taskflow</artifactId>
     <version>0.0.1-SNAPSHOT</version>
 
-    <name>taskflow</name>
+    <name>TaskFlow</name>
     <description>TaskFlow Todo Application</description>
+
+
+    <!-- ================================================================
+         JAVA VERSION
+         ================================================================
+
+         The application is standardized on Java 25.
+
+         Java 25 is used by:
+         - Local development
+         - Maven compilation
+         - Docker build
+         - GitHub Actions CI
+         - Production container
+         ================================================================ -->
 
     <properties>
         <java.version>25</java.version>
+        <tomcat.version>11.0.25</tomcat.version>
     </properties>
 
+
+    <!-- ================================================================
+         DEPENDENCIES
+         ================================================================ -->
+
     <dependencies>
+
+
+        <!-- ============================================================
+             SPRING BOOT ACTUATOR
+             ============================================================
+
+             Provides production/operational endpoints such as:
+
+             /actuator/health
+
+             Used by Kubernetes readiness and liveness probes.
+             ============================================================ -->
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
 
-        <!-- Spring Web -->
+
+        <!-- ============================================================
+             SPRING WEB
+             ============================================================
+
+             Provides:
+             - REST controllers
+             - Embedded web server
+             - HTTP request/response handling
+             - JSON REST APIs
+             ============================================================ -->
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
 
-        <!-- Spring Data JPA -->
+
+        <!-- ============================================================
+             SPRING DATA JPA
+             ============================================================
+
+             Provides:
+             - JPA
+             - Hibernate
+             - Repository abstraction
+             - Database persistence
+             ============================================================ -->
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-jpa</artifactId>
         </dependency>
 
-        <!-- Validation -->
+
+        <!-- ============================================================
+             VALIDATION
+             ============================================================
+
+             Provides Jakarta Bean Validation support.
+
+             Used for validating incoming API requests.
+             ============================================================ -->
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
 
-        <!-- PostgreSQL -->
+
+        <!-- ============================================================
+             POSTGRESQL
+             ============================================================
+
+             PostgreSQL JDBC driver.
+
+             Runtime scope is sufficient because the application only
+             needs the driver when connecting to PostgreSQL.
+
+             Production:
+                 AWS RDS PostgreSQL
+
+             Local development/testing:
+                 PostgreSQL / H2 depending on the profile
+             ============================================================ -->
+
         <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
             <scope>runtime</scope>
         </dependency>
 
-        <!-- Lombok -->
+
+        <!-- ============================================================
+             LOMBOK
+             ============================================================
+
+             Used for reducing Java boilerplate such as:
+             - Getters
+             - Setters
+             - Builders
+             - Constructors
+
+             Optional because Lombok is only required during compilation
+             and is not required by the application at runtime.
+             ============================================================ -->
+
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <optional>true</optional>
         </dependency>
 
-        <!-- Testing -->
+
+        <!-- ============================================================
+             SPRING BOOT TEST
+             ============================================================
+
+             Provides the main testing stack:
+
+             - JUnit 5
+             - Mockito
+             - Spring Test
+             - AssertJ
+             - JSON testing utilities
+             - Spring Boot test infrastructure
+
+             Scope = test means these dependencies are not included in
+             the production application.
+             ============================================================ -->
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
 
-        <!-- H2 Database for Integration Tests -->
+
+        <!-- ============================================================
+             SPRING BOOT MVC TESTING
+             ============================================================
+
+             Spring Boot 4 separates MVC testing support into its own
+             module.
+
+             Provides annotations/classes such as:
+
+             - @WebMvcTest
+             - @AutoConfigureMockMvc
+             - MockMvc MVC test infrastructure
+
+             Required by:
+             - TodoControllerTest
+             - TodoIntegrationTest
+             ============================================================ -->
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-webmvc-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+
+        <!-- ============================================================
+             H2 DATABASE
+             ============================================================
+
+             In-memory database used for integration tests.
+
+             The production environment uses PostgreSQL.
+
+             The test profile configures H2 separately so tests don't
+             require a running PostgreSQL server.
+             ============================================================ -->
+
         <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>
             <scope>test</scope>
         </dependency>
 
+
+
+        <!-- ============================================================
+             JACKSON CORE (v3.1.7)
+             ============================================================
+
+             Provides low-level streaming parser and generator APIs for
+             JSON and other data formats (Smile, CBOR, XML).
+
+             Serves as the underlying foundation for higher-level Jackson
+             databind modules.
+             ============================================================ -->
+
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-core</artifactId>
+            <version>3.1.7</version>
+        </dependency>
+
+
+        <!-- ============================================================
+             JACKSON DATABIND (v3.1.7)
+             ============================================================
+
+             Provides high-level data binding to map JSON data directly
+             to and from Java POJOs (ObjectMapper).
+
+             Depends on jackson-core and handles automatic object
+             serialization and deserialization across the application.
+             ============================================================ -->
+
+        <dependency>
+            <groupId>tools.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>3.1.7</version>
+        </dependency>
+
     </dependencies>
 
+
+    <!-- ================================================================
+         BUILD CONFIGURATION
+         ================================================================ -->
+
     <build>
+
         <plugins>
+
+
+            <!-- ========================================================
+                 MAVEN COMPILER PLUGIN
+                 ========================================================
+
+                 Explicitly compiles the project against Java 25.
+
+                 The annotationProcessorPaths section is important for
+                 Lombok because Lombok generates Java code during the
+                 compilation phase.
+                 ======================================================== -->
+
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.14.0</version>
+
                 <configuration>
+
+                    <!-- Compile using Java 25 -->
                     <release>${java.version}</release>
+
+                    <!-- Lombok annotation processor -->
                     <annotationProcessorPaths>
+
                         <path>
                             <groupId>org.projectlombok</groupId>
                             <artifactId>lombok</artifactId>
                         </path>
+
                     </annotationProcessorPaths>
+
                 </configuration>
             </plugin>
+
+
+            <!-- ========================================================
+                 SPRING BOOT MAVEN PLUGIN
+                 ========================================================
+
+                 Provides Spring Boot Maven functionality including:
+
+                 ./mvnw spring-boot:run
+
+                 and executable JAR packaging.
+
+                 The resulting JAR is used by the Docker image.
+                 ======================================================== -->
+
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
             </plugin>
+
         </plugins>
+
     </build>
 
 </project>

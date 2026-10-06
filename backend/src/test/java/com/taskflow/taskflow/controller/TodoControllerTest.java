@@ -1,18 +1,18 @@
 package com.taskflow.taskflow.controller;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.taskflow.taskflow.service.TodoService;
 import com.taskflow.taskflow.dto.TodoRequest;
 import com.taskflow.taskflow.entity.Priority;
 import com.taskflow.taskflow.entity.Status;
+import tools.jackson.databind.ObjectMapper;
 import com.taskflow.taskflow.entity.Todo;
 
 import org.junit.jupiter.api.Test;
 
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.beans.factory.annotation.Autowired;
 
-import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import org.springframework.http.MediaType;
 
@@ -35,7 +35,7 @@ class TodoControllerTest {
     @Autowired
     ObjectMapper objectMapper;
 
-    @MockBean
+    @MockitoBean
     TodoService service;
 
     @Test
