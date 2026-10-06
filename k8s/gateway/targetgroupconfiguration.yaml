@@ -1,0 +1,13 @@
+apiVersion: gateway.k8s.aws/v1
+kind: TargetGroupConfiguration
+
+metadata:
+  name: taskflow-frontend-tg
+  namespace: taskflow
+
+spec:
+  targetReference:
+    name: taskflow-frontend
+
+  defaultConfiguration:
+    targetType: ip
