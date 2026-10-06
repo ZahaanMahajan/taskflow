@@ -16,6 +16,9 @@ spec:
         app: taskflow-backend
 
     spec:
+      imagePullSecrets:
+        - name: taskflow-ghcr-pull-secret
+
       containers:
         - name: backend
           image: ghcr.io/zahaanmahajan/taskflow-backend:latest
