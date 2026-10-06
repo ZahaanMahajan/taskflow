@@ -21,7 +21,7 @@ spec:
 
       containers:
         - name: backend
-          image: ghcr.io/zahaanmahajan/taskflow-backend:4fa28b750562b458c2fa90a1d509dae70f1bef37
+          image: ghcr.io/zahaanmahajan/taskflow-backend:eeda8ae3ff42828d0dad665ccfddf8dd969f1207
 
           ports:
             - containerPort: 8080
