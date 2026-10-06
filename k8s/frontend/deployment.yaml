@@ -21,7 +21,7 @@ spec:
 
       containers:
         - name: frontend
-          image: ghcr.io/zahaanmahajan/taskflow-frontend:latest
+          image: ghcr.io/zahaanmahajan/taskflow-frontend:5bef4715f7ed0f419d4933baf3d154b1e04deae9
 
           ports:
             - containerPort: 80
