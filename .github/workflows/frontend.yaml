@@ -47,7 +47,7 @@ jobs:
         working-directory: frontend
         run: |
           docker build \
-            -t ghcr.io/${{ github.repository_owner }}/taskflow-frontend:${{ github.sha }} \
+            -t ghcr.io/zahaanmahajan/taskflow-frontend:${{ github.sha }} \
             .
 
       - name: Scan image
