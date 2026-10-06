@@ -14,6 +14,9 @@ function Dashboard() {
   const loadTodos = async () => {
     const data = await getTodos();
 
+    console.log("Todos API response:", data);
+    console.log("Is array:", Array.isArray(data));
+
     setTodos(data);
   };
 
