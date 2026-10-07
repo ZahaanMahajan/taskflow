@@ -1,8 +1,10 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
+
 metadata:
   name: taskflow
   namespace: argocd
+
 spec:
   project: default
 
@@ -10,6 +12,9 @@ spec:
     repoURL: git@github.com:zahaanmahajan/taskflow.git
     targetRevision: main
     path: k8s
+
+    directory:
+      recurse: true
 
   destination:
     server: https://kubernetes.default.svc

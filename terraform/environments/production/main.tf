@@ -75,3 +75,8 @@ module "route53" {
   alb_dns_name = "k8s-taskflow-taskflow-b597d3c40a-1218659813.ap-south-1.elb.amazonaws.com"
 }
 
+module "external_secrets" {
+  source = "../../modules/external-secrets"
+
+  cluster_name = module.eks.cluster_name
+}
