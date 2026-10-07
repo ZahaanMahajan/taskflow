@@ -1,0 +1,317 @@
+name: TaskFlow CI/CD
+
+on:
+  workflow_dispatch:
+
+  push:
+    branches:
+      - main
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - ".github/workflows/taskflow.yaml"
+
+permissions:
+  contents: read
+
+jobs:
+
+  # ============================================================
+  # CHANGE DETECTION
+  # ============================================================
+
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+
+    outputs:
+      backend: ${{ steps.changes.outputs.backend }}
+      frontend: ${{ steps.changes.outputs.frontend }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed components
+        id: changes
+        uses: dorny/paths-filter@v4
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+
+            frontend:
+              - 'frontend/**'
+
+
+  # ============================================================
+  # BACKEND CI
+  # ============================================================
+
+  backend-ci:
+    name: Backend CI
+    needs: detect-changes
+    if: needs.detect-changes.outputs.backend == 'true'
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: maven
+          cache-dependency-path: backend/pom.xml
+
+      - name: Test
+        working-directory: backend
+        run: ./mvnw clean test
+
+
+  # ============================================================
+  # FRONTEND CI
+  # ============================================================
+
+  frontend-ci:
+    name: Frontend CI
+    needs: detect-changes
+    if: needs.detect-changes.outputs.frontend == 'true'
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+
+
+  # ============================================================
+  # BACKEND IMAGE
+  # ============================================================
+
+  backend-image:
+    name: Backend Image
+    needs: backend-ci
+    if: needs.backend-ci.result == 'success'
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    env:
+      IMAGE_NAME: ghcr.io/zahaanmahajan/taskflow-backend
+      IMAGE_TAG: ${{ github.sha }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./backend
+          push: false
+          load: true
+          tags: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+
+      - name: Scan image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image
+        run: |
+          docker push \
+            "${IMAGE_NAME}:${IMAGE_TAG}"
+
+
+  # ============================================================
+  # FRONTEND IMAGE
+  # ============================================================
+
+  frontend-image:
+    name: Frontend Image
+    needs: frontend-ci
+    if: needs.frontend-ci.result == 'success'
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    env:
+      IMAGE_NAME: ghcr.io/zahaanmahajan/taskflow-frontend
+      IMAGE_TAG: ${{ github.sha }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./frontend
+          push: false
+          load: true
+          tags: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+
+      - name: Scan image
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE_NAME }}:${{ env.IMAGE_TAG }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image
+        run: |
+          docker push \
+            "${IMAGE_NAME}:${IMAGE_TAG}"
+
+
+  # ============================================================
+  # GITOPS DEPLOYMENT
+  # ============================================================
+
+  update-gitops:
+    name: Update GitOps
+    needs:
+      - detect-changes
+      - backend-ci
+      - frontend-ci
+      - backend-image
+      - frontend-image
+
+    if: |
+      always() &&
+      needs.detect-changes.result == 'success' &&
+      (
+        needs.backend-image.result == 'success' ||
+        needs.frontend-image.result == 'success'
+      )
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    concurrency:
+      group: taskflow-gitops-update
+      cancel-in-progress: false
+
+    env:
+      BACKEND_CHANGED: ${{ needs.detect-changes.outputs.backend }}
+      FRONTEND_CHANGED: ${{ needs.detect-changes.outputs.frontend }}
+      IMAGE_TAG: ${{ github.sha }}
+
+    steps:
+      - name: Checkout latest main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Update backend image
+        if: env.BACKEND_CHANGED == 'true'
+        run: |
+          sed -i \
+            "s|image: ghcr.io/zahaanmahajan/taskflow-backend:.*|image: ghcr.io/zahaanmahajan/taskflow-backend:${IMAGE_TAG}|" \
+            k8s/applications/taskflow/backend/deployment.yaml
+
+      - name: Update frontend image
+        if: env.FRONTEND_CHANGED == 'true'
+        run: |
+          sed -i \
+            "s|image: ghcr.io/zahaanmahajan/taskflow-frontend:.*|image: ghcr.io/zahaanmahajan/taskflow-frontend:${IMAGE_TAG}|" \
+            k8s/applications/taskflow/frontend/deployment.yaml
+
+      - name: Show GitOps changes
+        run: |
+          git diff -- \
+            k8s/applications/taskflow/backend/deployment.yaml \
+            k8s/applications/taskflow/frontend/deployment.yaml
+
+      - name: Validate Git diff
+        run: git diff --check
+
+      - name: Commit GitOps changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add \
+            k8s/applications/taskflow/backend/deployment.yaml \
+            k8s/applications/taskflow/frontend/deployment.yaml
+
+          git commit \
+            -m "chore: deploy TaskFlow ${IMAGE_TAG}"
+
+      - name: Push GitOps commit
+        run: |
+          for attempt in 1 2 3; do
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+
+            echo "Push failed. Synchronizing with latest main..."
+
+            git fetch origin main
+            git rebase origin/main
+          done
+
+          echo "Failed to push GitOps commit after 3 attempts."
+          exit 1
