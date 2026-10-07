@@ -33,19 +33,19 @@ spec:
             - name: DB_URL
               valueFrom:
                 secretKeyRef:
-                  name: taskflow-db
+                  name: taskflow-db-managed
                   key: DB_URL
 
             - name: DB_USER
               valueFrom:
                 secretKeyRef:
-                  name: taskflow-db
+                  name: taskflow-db-managed
                   key: DB_USER
 
             - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: taskflow-db
+                  name: taskflow-db-managed
                   key: DB_PASSWORD
 
           readinessProbe:
