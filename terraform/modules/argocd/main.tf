@@ -1,3 +1,13 @@
+resource "kubernetes_namespace_v1" "argocd" {
+  metadata {
+    name = var.namespace
+
+    labels = {
+      "gateway-access" = "taskflow"
+    }
+  }
+}
+
 resource "helm_release" "argocd" {
   name       = "argocd"
   namespace  = var.namespace
@@ -5,7 +15,11 @@ resource "helm_release" "argocd" {
   chart      = "argo-cd"
   version    = var.chart_version
 
-  create_namespace = true
+  create_namespace = false
+
+  depends_on = [
+    kubernetes_namespace_v1.argocd
+  ]
 
   values = [
     yamlencode({
@@ -13,6 +27,7 @@ resource "helm_release" "argocd" {
         extraArgs = [
           "--insecure"
         ]
+
         service = {
           type = "ClusterIP"
         }
