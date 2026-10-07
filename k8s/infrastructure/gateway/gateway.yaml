@@ -16,8 +16,13 @@ spec:
 
   listeners:
     - name: https
+      hostname: "*.aws.zahaan.online"
       protocol: HTTPS
       port: 443
+
       allowedRoutes:
         namespaces:
-          from: Same
+          from: Selector
+          selector:
+            matchLabels:
+              gateway-access: taskflow

@@ -9,11 +9,15 @@ spec:
   parentRefs:
     - name: taskflow-gateway
 
+  hostnames:
+    - taskflow.aws.zahaan.online
+
   rules:
     - matches:
         - path:
             type: PathPrefix
             value: /
+
       backendRefs:
         - name: taskflow-frontend
           port: 80

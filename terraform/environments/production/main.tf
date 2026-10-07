@@ -71,6 +71,7 @@ module "argocd" {
 module "route53" {
   source = "../../modules/route53"
 
-  domain_name = "aws.zahaan.online"
+  domain_name  = "aws.zahaan.online"
+  alb_dns_name = "k8s-taskflow-taskflow-b597d3c40a-1218659813.ap-south-1.elb.amazonaws.com"
 }
 
