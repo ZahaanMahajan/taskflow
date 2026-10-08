@@ -1,33 +1,25 @@
 apiVersion: apps/v1
 kind: Deployment
-
 metadata:
   name: taskflow-frontend
   namespace: taskflow
-
 spec:
   replicas: 2
-
   selector:
     matchLabels:
       app: taskflow-frontend
-
   template:
     metadata:
       labels:
         app: taskflow-frontend
-
     spec:
       imagePullSecrets:
         - name: taskflow-ghcr-pull-secret
-
       containers:
         - name: frontend
-          image: ghcr.io/zahaanmahajan/taskflow-frontend:790b28c8dfb9585d9e035a7a7ac4135de458439b
-
+          image: ghcr.io/zahaanmahajan/taskflow-frontend:d172f1b634c301ac2b66633e769e6c8d91812375
           ports:
             - containerPort: 80
-
           resources:
             requests:
               cpu: 50m
@@ -35,14 +27,12 @@ spec:
             limits:
               cpu: 200m
               memory: 128Mi
-
           readinessProbe:
             httpGet:
               path: /
               port: 80
             initialDelaySeconds: 5
             periodSeconds: 10
-
           livenessProbe:
             httpGet:
               path: /
