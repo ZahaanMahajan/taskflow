@@ -265,19 +265,70 @@ jobs:
           ref: main
           fetch-depth: 0
 
+      - name: Install yq
+        uses: mikefarah/yq@v4
+
       - name: Update backend image
         if: env.BACKEND_CHANGED == 'true'
+        env:
+          IMAGE_NAME: ghcr.io/zahaanmahajan/taskflow-backend
         run: |
-          sed -i \
-            "s|image: ghcr.io/zahaanmahajan/taskflow-backend:.*|image: ghcr.io/zahaanmahajan/taskflow-backend:${IMAGE_TAG}|" \
-            k8s/applications/taskflow/backend/deployment.yaml
+          yq -i '
+            (.spec.template.spec.containers[] |
+             select(.name == "backend") |
+             .image) = env(IMAGE_NAME) + ":" + env(IMAGE_TAG)
+          ' k8s/applications/taskflow/backend/deployment.yaml
 
       - name: Update frontend image
         if: env.FRONTEND_CHANGED == 'true'
+        env:
+          IMAGE_NAME: ghcr.io/zahaanmahajan/taskflow-frontend
         run: |
-          sed -i \
-            "s|image: ghcr.io/zahaanmahajan/taskflow-frontend:.*|image: ghcr.io/zahaanmahajan/taskflow-frontend:${IMAGE_TAG}|" \
-            k8s/applications/taskflow/frontend/deployment.yaml
+          yq -i '
+            (.spec.template.spec.containers[] |
+             select(.name == "frontend") |
+             .image) = env(IMAGE_NAME) + ":" + env(IMAGE_TAG)
+          ' k8s/applications/taskflow/frontend/deployment.yaml
+
+      - name: Verify backend image
+        if: env.BACKEND_CHANGED == 'true'
+        env:
+          EXPECTED_IMAGE: ghcr.io/zahaanmahajan/taskflow-backend:${{ env.IMAGE_TAG }}
+        run: |
+          ACTUAL_IMAGE=$(yq -r '
+            .spec.template.spec.containers[] |
+            select(.name == "backend") |
+            .image
+          ' k8s/applications/taskflow/backend/deployment.yaml)
+
+          if [ "$ACTUAL_IMAGE" != "$EXPECTED_IMAGE" ]; then
+            echo "ERROR: Backend image was not updated correctly."
+            echo "Expected: $EXPECTED_IMAGE"
+            echo "Actual:   $ACTUAL_IMAGE"
+            exit 1
+          fi
+
+          echo "Backend image verified: $ACTUAL_IMAGE"
+
+      - name: Verify frontend image
+        if: env.FRONTEND_CHANGED == 'true'
+        env:
+          EXPECTED_IMAGE: ghcr.io/zahaanmahajan/taskflow-frontend:${{ env.IMAGE_TAG }}
+        run: |
+          ACTUAL_IMAGE=$(yq -r '
+            .spec.template.spec.containers[] |
+            select(.name == "frontend") |
+            .image
+          ' k8s/applications/taskflow/frontend/deployment.yaml)
+
+          if [ "$ACTUAL_IMAGE" != "$EXPECTED_IMAGE" ]; then
+            echo "ERROR: Frontend image was not updated correctly."
+            echo "Expected: $EXPECTED_IMAGE"
+            echo "Actual:   $ACTUAL_IMAGE"
+            exit 1
+          fi
+
+          echo "Frontend image verified: $ACTUAL_IMAGE"
 
       - name: Show GitOps changes
         run: |
