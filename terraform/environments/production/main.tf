@@ -65,7 +65,7 @@ module "aws_load_balancer_controller" {
 module "argocd" {
   source = "../../modules/argocd"
 
-  certificate_arn = "arn:aws:acm:ap-south-1:372951851996:certificate/8ce98ad6-0de9-41a2-8414-203bda17fb0d"
+  certificate_arn = module.acm.certificate_arn
 }
 
 module "route53" {
@@ -79,4 +79,10 @@ module "external_secrets" {
   source = "../../modules/external-secrets"
 
   cluster_name = module.eks.cluster_name
+}
+
+module "acm" {
+  source = "../../modules/acm"
+
+  domain_name = "*.aws.zahaan.online"
 }
