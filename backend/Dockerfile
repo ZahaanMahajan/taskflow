@@ -13,6 +13,8 @@ RUN ./mvnw clean package -DskipTests
 
 FROM eclipse-temurin:25-jre
 
+RUN rm -f /usr/bin/pebble
+
 WORKDIR /app
 
 COPY --from=builder /app/target/*.jar app.jar
