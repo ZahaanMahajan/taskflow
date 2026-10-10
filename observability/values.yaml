@@ -1,7 +1,37 @@
 fullnameOverride: monitoring
 
 alertmanager:
-  enabled: false
+  enabled: true
+  config:
+    global:
+      resolve_timeout: 5m
+
+    route:
+      receiver: "null"
+      group_by:
+        - alertname
+        - namespace
+        - service
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      routes:
+        - receiver: discord
+          matchers:
+            - service="taskflow"
+            - severity=~"critical|warning"
+
+    receivers:
+      - name: "null"
+
+      - name: discord
+        discord_configs:
+          - webhook_url_file: /etc/alertmanager/secrets/alertmanager-discord-webhook/webhook-url
+            send_resolved: true
+
+  alertmanagerSpec:
+    secrets:
+      - alertmanager-discord-webhook
 
 grafana:
   enabled: true
