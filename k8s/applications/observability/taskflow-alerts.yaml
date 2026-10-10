@@ -1,0 +1,75 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: taskflow-alerts
+  namespace: observability
+  labels:
+    release: monitoring
+spec:
+  groups:
+    - name: taskflow.availability
+      rules:
+        - alert: TaskFlowBackendTargetDown
+          expr: up{namespace="taskflow", job="taskflow-backend"} == 0
+          for: 2m
+          labels:
+            severity: critical
+            service: taskflow
+          annotations:
+            summary: "TaskFlow backend target is down"
+            description: "Prometheus has been unable to scrape {{ $labels.instance }} for at least 2 minutes."
+
+    - name: taskflow.application
+      rules:
+        - alert: TaskFlowHighHttp5xxRate
+          expr: |
+            (
+              sum(rate(http_server_requests_seconds_count{
+                namespace="taskflow",
+                job="taskflow-backend",
+                status=~"5..",
+                uri!~"/actuator/.*"
+              }[5m]))
+              /
+              clamp_min(
+                sum(rate(http_server_requests_seconds_count{
+                  namespace="taskflow",
+                  job="taskflow-backend",
+                  uri!~"/actuator/.*"
+                }[5m])),
+                0.001
+              )
+            ) > 0.05
+          for: 5m
+          labels:
+            severity: warning
+            service: taskflow
+          annotations:
+            summary: "TaskFlow HTTP 5xx rate is elevated"
+            description: "More than 5% of TaskFlow application requests have returned HTTP 5xx responses for 5 minutes."
+
+        - alert: TaskFlowHighRequestLatency
+          expr: |
+            (
+              sum(rate(http_server_requests_seconds_sum{
+                namespace="taskflow",
+                job="taskflow-backend",
+                uri!~"/actuator/.*"
+              }[5m]))
+              /
+              clamp_min(
+                sum(rate(http_server_requests_seconds_count{
+                  namespace="taskflow",
+                  job="taskflow-backend",
+                  uri!~"/actuator/.*"
+                }[5m])),
+                0.001
+              )
+            ) > 0.5
+          for: 5m
+          labels:
+            severity: warning
+            service: taskflow
+          annotations:
+            summary: "TaskFlow request latency is elevated"
+            description: "Mean application request latency has exceeded 500 ms for 5 minutes."
