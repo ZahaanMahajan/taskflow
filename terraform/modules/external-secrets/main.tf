@@ -31,6 +31,17 @@ resource "aws_secretsmanager_secret" "argocd_github" {
   }
 }
 
+resource "aws_secretsmanager_secret" "grafana" {
+  name        = "taskflow/production/grafana"
+  description = "Grafana administrator credentials"
+
+  tags = {
+    Project     = "taskflow"
+    Environment = "production"
+    ManagedBy   = "terraform"
+  }
+}
+
 resource "aws_iam_policy" "external_secrets" {
   name        = "${var.cluster_name}-external-secrets"
   description = "Allow External Secrets Operator to read TaskFlow database secret"
@@ -53,6 +64,7 @@ resource "aws_iam_policy" "external_secrets" {
           aws_secretsmanager_secret.taskflow_database.arn,
           aws_secretsmanager_secret.taskflow_ghcr.arn,
           aws_secretsmanager_secret.argocd_github.arn,
+          aws_secretsmanager_secret.grafana.arn,
         ]
       }
     ]
