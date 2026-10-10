@@ -1,0 +1,18 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: taskflow-backend
+  namespace: taskflow
+  labels:
+    release: monitoring
+spec:
+  namespaceSelector:
+    matchNames:
+      - taskflow
+  selector:
+    matchLabels:
+      app: taskflow-backend
+  endpoints:
+    - port: http
+      path: /actuator/prometheus
+      interval: 30s

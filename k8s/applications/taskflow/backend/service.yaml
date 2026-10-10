@@ -3,12 +3,12 @@ kind: Service
 metadata:
   name: taskflow-backend
   namespace: taskflow
+  labels:
+    app: taskflow-backend
 spec:
   type: ClusterIP
-
   selector:
     app: taskflow-backend
-
   ports:
     - name: http
       port: 8080
