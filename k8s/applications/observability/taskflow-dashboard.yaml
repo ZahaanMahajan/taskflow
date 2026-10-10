@@ -1,10 +1,12 @@
 apiVersion: v1
 kind: ConfigMap
+
 metadata:
   name: taskflow-production-dashboard
   namespace: observability
   labels:
     grafana_dashboard: "1"
+
 data:
   taskflow-production.json: |-
     {

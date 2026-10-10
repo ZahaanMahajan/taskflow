@@ -16,10 +16,17 @@ alertmanager:
       group_interval: 5m
       repeat_interval: 4h
       routes:
+        # TaskFlow application alerts
         - receiver: discord
           matchers:
             - service="taskflow"
             - severity=~"critical|warning"
+
+        # Kubernetes infrastructure alerts
+        - receiver: discord
+          matchers:
+            - severity=~"critical|warning"
+            - alertname!~"Watchdog|InfoInhibitor"
 
     receivers:
       - name: "null"
@@ -110,3 +117,4 @@ prometheus-node-exporter:
     limits:
       cpu: 100m
       memory: 64Mi
+
