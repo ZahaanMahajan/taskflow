@@ -73,3 +73,13 @@ spec:
           annotations:
             summary: "TaskFlow request latency is elevated"
             description: "Mean application request latency has exceeded 500 ms for 5 minutes."
+
+        - alert: TaskFlowBackendTargetsMissing
+          expr: absent(up{namespace="taskflow", job="taskflow-backend"})
+          for: 2m
+          labels:
+            severity: critical
+            service: taskflow
+          annotations:
+            summary: "All TaskFlow backend targets are missing"
+            description: "Prometheus has no discovered scrape targets for the TaskFlow backend for at least 2 minutes."
