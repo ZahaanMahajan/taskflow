@@ -19,6 +19,29 @@ spec:
             summary: "TaskFlow backend target is down"
             description: "Prometheus has been unable to scrape {{ $labels.instance }} for at least 2 minutes."
 
+
+    - name: infrastructure.node-exporter
+      rules:
+        - alert: NodeExporterTargetDown
+          expr: up{job="node-exporter"} == 0
+          for: 5m
+          labels:
+            severity: warning
+            service: infrastructure
+          annotations:
+            summary: "Node exporter target is down"
+            description: "Prometheus has been unable to scrape node exporter at {{ $labels.instance }} for 5 minutes."
+
+        - alert: NodeExporterTargetsMissing
+          expr: absent(up{job="node-exporter"})
+          for: 5m
+          labels:
+            severity: warning
+            service: infrastructure
+          annotations:
+            summary: "All node exporter targets are missing"
+            description: "Prometheus has no discovered node-exporter targets for 5 minutes."
+
     - name: taskflow.application
       rules:
         - alert: TaskFlowHighHttp5xxRate
