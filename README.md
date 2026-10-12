@@ -7,6 +7,8 @@ A full-stack task manager (React + Spring Boot + PostgreSQL) with a complete clo
 - **Want to deploy it to AWS?** Read [Deploy to AWS](#deploy-to-aws), including the cost warning, first.
 
 > **AWS cost warning:** the production setup creates billable resources (EKS control plane, 2 EC2 nodes, 2 NAT gateways, an Application Load Balancer, RDS, EBS volumes, Route 53). Running the local setup costs nothing.
+>
+> Check the **AWS Billing console** while testing, set an AWS Budgets alert, and clean up immediately afterwards with [Destroying the environment](#destroying-the-environment). Destroying EKS alone does not remove retained EBS volumes, manual RDS snapshots, or the RDS final snapshot, and those keep billing until you delete them.
 
 ## Table of contents
 
@@ -154,16 +156,7 @@ docker compose down -v     # stop and DELETE the database volume
 
 Local Compose credentials (database `taskflow`, user `taskflow`, password `taskflow`) are for local use only.
 
-> **Required fix to `docker-compose.yml`:** the frontend's nginx config (`frontend/nginx/default.conf`) proxies to the hostname `taskflow-backend`, which is the Kubernetes service name. In Compose the backend service is called `backend`, so nginx cannot resolve it. Add a network alias to the `backend` service:
->
-> ```yaml
->   backend:
->     # ...existing settings...
->     networks:
->       default:
->         aliases:
->           - taskflow-backend
-> ```
+> **Why the `taskflow-backend` alias exists:** the frontend's nginx config (`frontend/nginx/default.conf`) proxies to `taskflow-backend`, the Kubernetes service name. The `backend` service in `docker-compose.yml` declares a network alias with that name so the same frontend image works in Compose and in Kubernetes. No manual edit is needed.
 
 ## Local development without Docker
 
@@ -269,11 +262,11 @@ cd backend
 ```bash
 cd frontend
 npm ci
-npm run build     # this is what CI runs
-npm run lint
+npm run lint      # CI runs this
+npm run build     # CI runs this
 ```
 
-> `npm run lint` currently reports 2 errors (`react-hooks/set-state-in-effect` in `src/pages/Dashboard.jsx` and `src/components/TodoModal.jsx`). CI does not run lint, so the build passes.
+CI runs both `npm run lint` and `npm run build`, so run them locally before pushing.
 
 **Load tests** ([k6](https://k6.io/docs/get-started/installation/) required). `taskflow-read.js` only reads; `taskflow.js` also creates todos, so do not point it at data you care about:
 
@@ -315,20 +308,39 @@ Search and replace before the first `terraform apply`:
 | Terraform state bucket | `terraform/environments/production/versions.tf` | a bucket you own |
 | EKS API allowed IP (`49.36.203.4/32`) | `terraform/modules/eks/main.tf` (`public_access_cidrs`) | your public IP as `x.x.x.x/32`, otherwise `kubectl` and the Helm provider cannot reach the cluster |
 | Domain `aws.zahaan.online` | `terraform/environments/production/main.tf` (route53, acm), `k8s/infrastructure/gateway/gateway.yaml`, `k8s/applications/taskflow/gateway/httproute.yaml`, `k8s/applications/argocd/httproute.yaml`, optionally the `CORS_ALLOWED_ORIGINS` default in `application.properties` and the k6 default URL | your subdomain |
-| ACM certificate ARN (contains the author's AWS account ID) | `k8s/infrastructure/gateway/loadbalancerconfiguration.yaml` | your certificate ARN, available after the first apply |
-| ALB DNS name | `alb_dns_name` in `terraform/environments/production/main.tf` | your ALB's DNS name, available after the Gateway is created (see Step 6) |
+| ACM certificate ARN (contains the author's AWS account ID) | `k8s/infrastructure/gateway/loadbalancerconfiguration.yaml` | your certificate ARN, available after Step 2 (see Step 4) |
+| ALB DNS name | `alb_dns_name` in `terraform/environments/production/main.tf` | your ALB's DNS name, available only after the Gateway creates the ALB (see Step 8) |
 | Image names `ghcr.io/zahaanmahajan/...` | `.github/workflows/taskflow.yaml`, both `deployment.yaml` files under `k8s/applications/taskflow/` | your GitHub user or org, in lowercase |
 | Git repo URL `git@github.com:zahaanmahajan/taskflow.git` | `argocd/taskflow.yaml`, `k8s/applications/observability/application.yaml` | your repository |
 
 ### Step 1: Create the Terraform state bucket
 
-The bucket must exist before `terraform init`. Terraform does not create it.
+The bucket must exist before `terraform init`. Terraform does not create it, and the state it holds can contain sensitive infrastructure details, so lock it down. Bucket names are globally unique, so pick your own and use the same name in `versions.tf`.
 
 ```bash
-aws s3api create-bucket --bucket <YOUR_STATE_BUCKET> --region ap-south-1 \
+BUCKET=<YOUR_STATE_BUCKET>
+
+aws s3api create-bucket --bucket "$BUCKET" --region ap-south-1 \
   --create-bucket-configuration LocationConstraint=ap-south-1
-aws s3api put-bucket-versioning --bucket <YOUR_STATE_BUCKET> \
+
+aws s3api put-public-access-block --bucket "$BUCKET" \
+  --public-access-block-configuration \
+  BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+
+aws s3api put-bucket-encryption --bucket "$BUCKET" \
+  --server-side-encryption-configuration \
+  '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
+
+aws s3api put-bucket-versioning --bucket "$BUCKET" \
   --versioning-configuration Status=Enabled
+```
+
+Verify the setup, and check that it matches the `backend "s3"` block in `terraform/environments/production/versions.tf` (`bucket`, `key`, `region = "ap-south-1"`, `encrypt = true`, `use_lockfile = true`):
+
+```bash
+aws s3api get-public-access-block --bucket "$BUCKET"   # all four values true
+aws s3api get-bucket-encryption   --bucket "$BUCKET"
+aws s3api get-bucket-versioning   --bucket "$BUCKET"   # Status: Enabled
 ```
 
 ### Step 2: Apply Terraform
@@ -340,6 +352,8 @@ read -rsp "Database password: " TF_VAR_database_password; echo
 export TF_VAR_database_password
 ```
 
+Run the normal sequence. This is the expected way to deploy:
+
 ```bash
 terraform -chdir=terraform/environments/production init
 terraform -chdir=terraform/environments/production validate
@@ -347,23 +361,88 @@ terraform -chdir=terraform/environments/production plan
 terraform -chdir=terraform/environments/production apply
 ```
 
-Read the whole plan before approving. The Helm and Kubernetes providers connect to the cluster that this same configuration creates. If the first apply fails on Helm or Kubernetes resources, create the network and cluster first with `apply -target=module.vpc -target=module.eks`, then run a normal `apply`.
+Read the whole plan before approving.
+
+**If the apply fails**, read the error first. Two failures are expected on a brand-new account:
+
+- **Helm or Kubernetes provider cannot connect.** These providers connect to the cluster that this same configuration creates. This is the one case where a targeted apply is a reasonable recovery path:
+
+  ```bash
+  # Recovery only: build the prerequisites first...
+  terraform -chdir=terraform/environments/production apply \
+    -target=module.vpc -target=module.eks
+  # ...then immediately run the normal, untargeted apply again
+  terraform -chdir=terraform/environments/production apply
+  ```
+
+  `-target` is an exceptional Terraform feature, not a way to deploy this environment. Terraform itself warns that it can leave state and configuration out of step. Always finish with a full untargeted `apply` so everything is reconciled.
+
+- **The two Route 53 alias records fail.** `alb_dns_name` in `main.tf` points at the original author's load balancer, which does not exist in your account. Re-run after Step 8 puts in your own ALB's DNS name. Terraform still creates the independent resources; run `plan` afterwards to confirm nothing else is pending.
 
 Afterwards, connect `kubectl` and note the outputs:
 
 ```bash
 aws eks update-kubeconfig --name taskflow-production --region ap-south-1
 terraform -chdir=terraform/environments/production output
+kubectl get nodes
 ```
 
-### Step 3: Delegate DNS and validate the certificate
+### Step 3: Install the Gateway API CRDs
+
+Terraform installs the AWS Load Balancer Controller (Helm chart `3.6.0`, `terraform/modules/eks-controller/main.tf`) but **not** the Gateway API CRDs. Without them the controller does not reconcile `Gateway` and `HTTPRoute` resources, and no ALB is created.
+
+**1. Confirm the controller version** that chart `3.6.0` ships:
+
+```bash
+helm repo add eks https://aws.github.io/eks-charts && helm repo update
+helm show chart eks/aws-load-balancer-controller --version 3.6.0 | grep -E '^(version|appVersion):'
+```
+
+The `appVersion` should be `v3.6.0`. The manifests in this repo use `gateway.k8s.aws/v1` for `LoadBalancerConfiguration` and `TargetGroupConfiguration`, which needs controller v3.5.0 or newer. According to the controller's release notes, v3.6.0 is built against Gateway API CRDs v1.6.0.
+
+**2. Install the two sets of CRDs**, pinned to those versions (use the `appVersion` printed above for `LBC_VERSION` if it differs):
+
+```bash
+export LBC_VERSION=v3.6.0
+
+# Standard Gateway API CRDs (v1.6.0, the version the controller is built for)
+kubectl apply --server-side=true -f \
+  https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.6.0/standard-install.yaml
+
+# AWS-specific CRDs (LoadBalancerConfiguration, TargetGroupConfiguration, ListenerRuleConfiguration)
+kubectl apply -f \
+  "https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/${LBC_VERSION}/config/crd/gateway/gateway-crds.yaml"
+```
+
+Do not use `refs/heads/main` URLs here. They track whatever is newest and may not match your controller. When you later bump the chart version, upgrade the CRDs first, then the controller.
+
+**3. Restart the controller** so it detects the CRDs (the controller enables its ALB Gateway support when the CRDs are present; restarting is the safe way to guarantee it checks after they exist):
+
+```bash
+kubectl rollout restart deployment/aws-load-balancer-controller -n kube-system
+kubectl rollout status  deployment/aws-load-balancer-controller -n kube-system
+```
+
+**4. Verify:**
+
+```bash
+kubectl get crd | grep -E 'gateway.networking.k8s.io|gateway.k8s.aws'
+kubectl -n kube-system logs deploy/aws-load-balancer-controller | grep "gateway.k8s.aws/alb"
+```
+
+You should see the Gateway and HTTPRoute CRDs, the three `gateway.k8s.aws` CRDs, and log lines for the `gateway.k8s.aws/alb` controller. If the log line is missing, the controller started without the CRDs. Check the CRDs, then restart it again.
+
+### Step 4: Delegate DNS and validate the certificate
 
 - Create NS records at your DNS provider that point your subdomain at the `route53_name_servers` output.
 - The ACM certificate uses DNS validation, and the repo does not create the validation record. Add the CNAME shown in the ACM console to the Route 53 zone, and wait until the certificate is `Issued`.
+- Put the certificate's ARN into `k8s/infrastructure/gateway/loadbalancerconfiguration.yaml` (Step 0).
 
-### Step 4: Fill in the secrets
+**Then commit and push every Step 0 change to the `main` branch of your repository.** Argo CD deploys what is in Git, not what is on your laptop.
 
-Terraform creates four **empty** secrets in AWS Secrets Manager. You must set their values. Create the JSON files outside the repository, upload them, then delete them.
+### Step 5: Fill in the secrets
+
+Terraform creates four **empty** secrets in AWS Secrets Manager. You must set their values. Create the JSON files **outside the repository**, upload them, then delete them.
 
 | Secret ID | JSON content |
 |---|---|
@@ -385,38 +464,81 @@ Notes:
   `kubectl create secret docker-registry tmp --docker-server=ghcr.io --docker-username=<user> --docker-password=<PAT> --dry-run=client -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d`
 - For `argocd-github`, add the matching public key as a read-only **Deploy key** in your GitHub repository.
 
-### Step 5: Create the Discord webhook secret (manual)
+> **Keep credentials out of Git and out of your terminal history.**
+> - Never create these JSON files inside the repository. If you must, add them to `.gitignore` first, and check `git status` before every commit.
+> - Delete the files as soon as the upload succeeds (`shred -u database.json`, or `rm` on systems without `shred`).
+> - Do not `cat` or `echo` secret values, and avoid typing them directly into commands. Use `read -rs` prompts or files.
+> - If a secret is ever committed or pasted somewhere public, rotate it immediately. Deleting the commit is not enough.
 
-Alertmanager is configured to send alerts to Discord and expects a Kubernetes Secret named `alertmanager-discord-webhook` with the key `webhook-url`. It is not defined anywhere in this repository. Create it once the `observability` namespace exists (Argo CD creates it in Step 6):
+### Step 6: Bootstrap Argo CD
+
+Argo CD needs the repository credential before it can read the repository, and that credential is itself defined inside the repository. Apply the bootstrap resources by hand once, **checking each one is ready before moving on**, then apply the root application (run these from the repository root):
+
+```bash
+# 1. The secret store that lets External Secrets read AWS Secrets Manager
+kubectl apply -f k8s/infrastructure/secrets/clustersecretstore.yaml
+kubectl get clustersecretstore aws-secretsmanager          # wait until it reports Valid / Ready
+
+# 2. The Argo CD repository credential (ExternalSecret "taskflow-github-repo")
+kubectl apply -f k8s/applications/argocd/externalsecret-github-repo.yaml
+kubectl wait --for=condition=Ready externalsecret/taskflow-github-repo -n argocd --timeout=180s
+
+# 3. Confirm the resulting Secret exists and carries the Argo CD repository label
+kubectl get secret taskflow-github-repo -n argocd --show-labels
+#    expect the label: argocd.argoproj.io/secret-type=repository
+
+# 4. Only now start the root application
+kubectl apply -f argocd/taskflow.yaml
+```
+
+Do not print the Secret's contents. If step 2 times out, run `kubectl describe externalsecret taskflow-github-repo -n argocd`. The usual causes are an unset `taskflow/production/argocd-github` value (Step 5), a store that is not ready, or missing Pod Identity permissions for External Secrets. Fix that before step 4, otherwise the first sync fails with repository authentication errors.
+
+Argo CD then syncs everything under `k8s/` (recursively), including the application, Gateway, secret stores, and the monitoring stack, with automated prune and self-heal. Check progress:
+
+```bash
+kubectl get applications -n argocd
+```
+
+### Step 7: Create the Discord webhook secret (manual)
+
+Alertmanager sends alerts to Discord and expects a Kubernetes Secret named `alertmanager-discord-webhook` with the key `webhook-url`. It is not defined anywhere in this repository. The `observability` namespace is created by Argo CD in Step 6, so **wait until it exists**:
+
+```bash
+kubectl get namespace observability     # repeat until it exists
+```
+
+Then create the secret:
 
 ```bash
 read -rsp "Discord webhook URL: " WEBHOOK; echo
 kubectl create secret generic alertmanager-discord-webhook \
-  -n observability --from-literal=webhook-url="$WEBHOOK"
+  -n observability \
+  --from-literal=webhook-url="$WEBHOOK"
 unset WEBHOOK
 ```
 
-If you do not want Discord alerts, remove the `discord` receiver and routes from `observability/values.yaml`.
+If you do not want Discord alerts, remove the `discord` receiver and routes from `observability/values.yaml` instead.
 
-### Step 6: Bootstrap Argo CD
+### Step 8: Wait for the ALB, then point DNS at it
 
-Argo CD needs the repository credential before it can read the repository, and that credential is itself defined inside the repository. Apply the two bootstrap resources by hand once, then apply the root application:
-
-```bash
-kubectl apply -f k8s/infrastructure/secrets/clustersecretstore.yaml
-kubectl apply -f k8s/applications/argocd/externalsecret-github-repo.yaml
-kubectl apply -f argocd/taskflow.yaml
-```
-
-Argo CD then syncs everything under `k8s/` (recursively), including the application, gateway, secret stores, and the monitoring stack, with automated prune and self-heal.
-
-After the Gateway has created its Application Load Balancer, put the ALB's DNS name into `alb_dns_name` (Step 0) and run `terraform apply` again so that Route 53 points `taskflow.<domain>` and `argocd.<domain>` at it:
+The order matters: the Gateway API CRDs must exist (Step 3), the controller must be running with Gateway support, the Gateway must be accepted, and only then does an ALB exist whose DNS name you can use.
 
 ```bash
-kubectl get gateway -n taskflow
+kubectl get gateway taskflow-gateway -n taskflow
+kubectl describe gateway taskflow-gateway -n taskflow     # look for Accepted and Programmed = True
+kubectl get gateway taskflow-gateway -n taskflow -o jsonpath='{.status.addresses[0].value}'; echo
 ```
 
-### Step 7: Verify
+The last command prints the ALB's DNS name. You can cross-check it with `aws elbv2 describe-load-balancers --region ap-south-1 --query 'LoadBalancers[].DNSName'`. If there is no address after several minutes, check `kubectl describe gateway`, the controller logs (`kubectl -n kube-system logs deploy/aws-load-balancer-controller`), and that Step 3 was completed before the controller was restarted.
+
+Put that DNS name into `alb_dns_name` in `terraform/environments/production/main.tf`, then run the normal sequence again so Route 53 points `taskflow.<domain>` and `argocd.<domain>` at the ALB:
+
+```bash
+terraform -chdir=terraform/environments/production plan
+terraform -chdir=terraform/environments/production apply
+```
+
+### Step 9: Verify
 
 ```bash
 kubectl get applications -n argocd            # Synced / Healthy
@@ -427,12 +549,9 @@ kubectl rollout status deployment/taskflow-backend -n taskflow
 
 Then open `https://taskflow.<your-domain>`.
 
-### Gaps to be aware of
+### Gap to be aware of
 
-These are not installed or configured by anything in this repository. Verify them for your cluster:
-
-- **Gateway API CRDs and controller settings:** the repo installs the AWS Load Balancer Controller via Helm but not the Gateway API CRDs. Check the controller's documentation for what your chart version needs to reconcile `Gateway` resources with `gatewayClassName: aws-alb`.
-- **metrics-server:** the backend autoscaler (HPA) needs the Kubernetes Metrics API, and `kubectl top` depends on it. Nothing here installs it.
+- **metrics-server:** the backend autoscaler (HPA) needs the Kubernetes Metrics API, and `kubectl top` depends on it. Nothing in this repository installs it, so install it yourself if you want autoscaling to work.
 
 ## CI/CD and GitOps
 
@@ -442,7 +561,7 @@ Pipeline: `.github/workflows/taskflow.yaml`. It runs on manual dispatch and on p
 |---|---|
 | Detect changes | Determines whether backend and/or frontend changed |
 | Backend CI | JDK 25, `./mvnw clean test` |
-| Frontend CI | Node 22, `npm ci`, `npm run build` |
+| Frontend CI | Node 22, `npm ci`, `npm run lint`, `npm run build` |
 | Image build and scan | Builds the Docker image, runs Trivy (fails on fixable HIGH or CRITICAL findings), then pushes to GHCR |
 | Update GitOps | Writes the new image tag into the matching `deployment.yaml` and commits `chore: deploy TaskFlow <sha>` to `main` |
 | Deploy | Argo CD detects the commit and syncs the cluster |
@@ -490,7 +609,7 @@ Port 3000 is also the local Compose frontend, so stop one before starting the ot
 
 ### Autoscaling
 
-Only the **backend** has a Horizontal Pod Autoscaler: 2 to 5 replicas at 60% average CPU (`k8s/applications/taskflow/backend/hpa.yaml`). The frontend runs a fixed 2 replicas.
+Only the **backend** has a Horizontal Pod Autoscaler: 2 to 5 replicas at 60% average CPU (`k8s/applications/taskflow/backend/hpa.yaml`). The frontend has no HPA (`k8s/applications/taskflow/frontend/` contains none) and runs a fixed 2 replicas. `kubectl get hpa -n taskflow` should list a single autoscaler, `taskflow-backend`.
 
 ## Backup and recovery
 
@@ -522,13 +641,15 @@ Order matters, otherwise Terraform gets stuck on resources it did not create.
 1. Delete the Argo CD applications (or the Gateway and HTTPRoutes) so the AWS Load Balancer Controller removes the ALB and its target groups. Without this, VPC deletion fails.
 2. Delete the persistent volumes left by Prometheus and Grafana. The `gp3` StorageClass uses `reclaimPolicy: Retain`, so EBS volumes remain and keep billing until you delete them.
 3. RDS has deletion protection enabled. To destroy it deliberately, disable it first, make sure the final-snapshot name is unused, and review the plan.
-4. Run `terraform -chdir=terraform/environments/production destroy`, then delete manual snapshots and the state bucket if you no longer need them.
+4. Run `terraform -chdir=terraform/environments/production destroy`.
+5. Delete what Terraform does not remove: manual RDS snapshots (`taskflow-production-db-manual-*`), the final snapshot (`taskflow-production-db-final-snapshot`), any leftover EBS volumes, and finally the state bucket and the Secrets Manager secrets if scheduled deletion has not already removed them. Keep the final snapshot only if you want the data.
+6. Check the **Billing console** the next day to confirm charges have stopped.
 
 ## Troubleshooting
 
 | Symptom | Likely cause and fix |
 |---|---|
-| Compose: `frontend` exits or API calls fail with `host not found in upstream "taskflow-backend"` | Add the `taskflow-backend` network alias described in [Quick start](#quick-start-docker-compose) |
+| Compose: `frontend` exits or API calls fail with `host not found in upstream "taskflow-backend"` | Your `docker-compose.yml` is missing the `taskflow-backend` network alias on the `backend` service. Pull the latest version, then `docker compose up --build -d` |
 | Compose: backend restarts repeatedly | `docker compose logs --tail=100 backend`. Check the `DB_*` variables; inside Compose the DB host is `postgres`, not `localhost` |
 | `./mvnw` fails with an unsupported class/release version | You are not on JDK 25. Run `java -version` |
 | Port 3000, 5173, 8080 or 5432 already in use | Stop the other process, or change the host port in `docker-compose.yml` |
@@ -540,7 +661,10 @@ Order matters, otherwise Terraform gets stuck on resources it did not create.
 | Pod `CrashLoopBackOff` | `kubectl logs <pod> -n taskflow --previous`. Usually wrong `DB_URL` or password in the database secret |
 | ExternalSecret not `SecretSynced` | `kubectl describe externalsecret -n <ns> <name>`. Secret value not set, wrong secret ID, or missing Pod Identity permissions |
 | Argo CD not syncing | `kubectl describe application taskflow -n argocd`. Check repo URL, deploy key, and YAML validity |
-| Alertmanager pod stuck | The `alertmanager-discord-webhook` secret is missing (Step 5) |
+| Alertmanager pod stuck | The `alertmanager-discord-webhook` secret is missing (Step 7) |
+| Gateway has no address, no ALB is created | The Gateway API CRDs were missing when the controller started. Complete Step 3 and restart the controller. Then check `kubectl describe gateway taskflow-gateway -n taskflow` |
+| `no matches for kind "Gateway"` or `HTTPRoute` when syncing | Gateway API CRDs are not installed (Step 3) |
+| `namespaces "observability" not found` | Argo CD has not created it yet. Finish Step 6 and wait (Step 7) |
 | HPA shows `<unknown>` | metrics-server is not installed |
 | Backend cannot reach RDS | Check the RDS security group allows the EKS cluster security group on port 5432. Do not make RDS public |
 
