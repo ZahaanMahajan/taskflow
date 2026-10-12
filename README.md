@@ -39,6 +39,10 @@ A full-stack task manager (React + Spring Boot + PostgreSQL) with a complete clo
 
 ## Architecture
 
+<p align="center">
+  <img src="assets/taskflow.png" alt="TaskFlow Architecture Diagram" width="100%">
+</p>
+
 **Runtime**
 
 ```mermaid
