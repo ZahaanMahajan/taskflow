@@ -22,11 +22,11 @@ function Dashboard() {
 
   const loadTodos = async () => {
     try {
-      setError("");
-
       const data = await getTodos();
 
       setTodos(Array.isArray(data) ? data : []);
+
+      setError("");
     } catch (err) {
       console.error("Failed to load todos:", err);
 
@@ -37,7 +37,34 @@ function Dashboard() {
   };
 
   useEffect(() => {
-    loadTodos();
+    let ignore = false;
+
+    const fetchTodos = async () => {
+      try {
+        const data = await getTodos();
+
+        if (!ignore) {
+          setTodos(Array.isArray(data) ? data : []);
+          setError("");
+        }
+      } catch (err) {
+        console.error("Failed to load todos:", err);
+
+        if (!ignore) {
+          setError("Unable to load your tasks. Please try again.");
+        }
+      } finally {
+        if (!ignore) {
+          setLoading(false);
+        }
+      }
+    };
+
+    fetchTodos();
+
+    return () => {
+      ignore = true;
+    };
   }, []);
 
   const handleCreate = async (todo) => {
@@ -272,6 +299,7 @@ function Dashboard() {
 
       {editingTodo && (
         <TodoModal
+          key={editingTodo.id}
           todo={editingTodo}
           onUpdate={handleUpdate}
           onClose={() => setEditingTodo(null)}

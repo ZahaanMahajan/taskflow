@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 function TodoModal({ todo, onUpdate, onClose }) {
   const [title, setTitle] = useState(todo.title ?? "");
@@ -10,13 +10,6 @@ function TodoModal({ todo, onUpdate, onClose }) {
   const [status, setStatus] = useState(todo.status ?? "PENDING");
 
   const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => {
-    setTitle(todo.title ?? "");
-    setDescription(todo.description ?? "");
-    setPriority(todo.priority ?? "MEDIUM");
-    setStatus(todo.status ?? "PENDING");
-  }, [todo]);
 
   const handleSubmit = async (event) => {
     event.preventDefault();
