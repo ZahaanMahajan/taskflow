@@ -1,0 +1,117 @@
+{
+    "DBInstance": {
+        "DBInstanceIdentifier": "taskflow-production-db",
+        "DBInstanceClass": "db.t4g.micro",
+        "Engine": "postgres",
+        "DBInstanceStatus": "available",
+        "MasterUsername": "taskflow",
+        "DBName": "taskflow",
+        "Endpoint": {
+            "Address": "taskflow-production-db.c9s666yu4r7o.ap-south-1.rds.amazonaws.com",
+            "Port": 5432,
+            "HostedZoneId": "Z2VFMSZA74J7XZ"
+        },
+        "AllocatedStorage": 20,
+        "InstanceCreateTime": "2026-10-06T10:26:25.582000+00:00",
+        "PreferredBackupWindow": "16:48-17:18",
+        "BackupRetentionPeriod": 0,
+        "DBSecurityGroups": [],
+        "VpcSecurityGroups": [
+            {
+                "VpcSecurityGroupId": "sg-06a401c6265e1d55b",
+                "Status": "active"
+            }
+        ],
+        "DBParameterGroups": [
+            {
+                "DBParameterGroupName": "default.postgres17",
+                "ParameterApplyStatus": "in-sync"
+            }
+        ],
+        "AvailabilityZone": "ap-south-1b",
+        "DBSubnetGroup": {
+            "DBSubnetGroupName": "taskflow-production-db-subnet-group",
+            "DBSubnetGroupDescription": "Managed by Terraform",
+            "VpcId": "vpc-0b926ed6bfba4de34",
+            "SubnetGroupStatus": "Complete",
+            "Subnets": [
+                {
+                    "SubnetIdentifier": "subnet-01a448af10f6225be",
+                    "SubnetAvailabilityZone": {
+                        "Name": "ap-south-1b"
+                    },
+                    "SubnetOutpost": {},
+                    "SubnetStatus": "Active"
+                },
+                {
+                    "SubnetIdentifier": "subnet-0a2d8aa36ae138cbb",
+                    "SubnetAvailabilityZone": {
+                        "Name": "ap-south-1a"
+                    },
+                    "SubnetOutpost": {},
+                    "SubnetStatus": "Active"
+                }
+            ]
+        },
+        "PreferredMaintenanceWindow": "sun:06:23-sun:06:53",
+        "UpgradeRolloutOrder": "second",
+        "PendingModifiedValues": {},
+        "MultiAZ": false,
+        "EngineVersion": "17.9",
+        "AutoMinorVersionUpgrade": true,
+        "ReadReplicaDBInstanceIdentifiers": [],
+        "LicenseModel": "postgresql-license",
+        "Iops": 3000,
+        "StorageThroughput": 125,
+        "OptionGroupMemberships": [
+            {
+                "OptionGroupName": "default:postgres-17",
+                "Status": "in-sync"
+            }
+        ],
+        "PubliclyAccessible": false,
+        "StorageType": "gp3",
+        "DbInstancePort": 0,
+        "StorageEncrypted": true,
+        "KmsKeyId": "arn:aws:kms:ap-south-1:372951851996:key/f2d44e8b-fb2f-4c39-82ea-08cd52a7c78d",
+        "DbiResourceId": "db-3UKGCDST3Z5NM4IGYAAIBICLEY",
+        "CACertificateIdentifier": "rds-ca-rsa2048-g1",
+        "DomainMemberships": [],
+        "CopyTagsToSnapshot": false,
+        "MonitoringInterval": 0,
+        "DBInstanceArn": "arn:aws:rds:ap-south-1:372951851996:db:taskflow-production-db",
+        "IAMDatabaseAuthenticationEnabled": false,
+        "DatabaseInsightsMode": "standard",
+        "PerformanceInsightsEnabled": false,
+        "DeletionProtection": false,
+        "AssociatedRoles": [],
+        "MaxAllocatedStorage": 100,
+        "TagList": [
+            {
+                "Key": "Project",
+                "Value": "taskflow"
+            },
+            {
+                "Key": "Environment",
+                "Value": "production"
+            },
+            {
+                "Key": "ManagedBy",
+                "Value": "terraform"
+            },
+            {
+                "Key": "Name",
+                "Value": "taskflow-production-db"
+            }
+        ],
+        "CustomerOwnedIpEnabled": false,
+        "NetworkType": "IPV4",
+        "BackupTarget": "region",
+        "CertificateDetails": {
+            "CAIdentifier": "rds-ca-rsa2048-g1",
+            "ValidTill": "2027-10-06T10:25:08+00:00"
+        },
+        "DedicatedLogVolume": false,
+        "EngineLifecycleSupport": "open-source-rds-extended-support"
+    }
+}

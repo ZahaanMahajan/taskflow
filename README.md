@@ -6,9 +6,11 @@ A full-stack task manager (React + Spring Boot + PostgreSQL) with a complete clo
 - **Want to hack on the code?** See [Local development without Docker](#local-development-without-docker).
 - **Want to deploy it to AWS?** Read [Deploy to AWS](#deploy-to-aws), including the cost warning, first.
 
-> **AWS cost warning:** the production setup creates billable resources (EKS control plane, 2 EC2 nodes, 2 NAT gateways, an Application Load Balancer, RDS, EBS volumes, Route 53). Running the local setup costs nothing.
+> **AWS cost warning:** The AWS deployment creates billable resources, including the EKS control plane, EC2 worker nodes, NAT gateways, an Application Load Balancer, RDS, and potentially EBS volumes and retained snapshots. Local Docker Compose does not require these AWS resources.
 >
-> Check the **AWS Billing console** while testing, set an AWS Budgets alert, and clean up immediately afterwards with [Destroying the environment](#destroying-the-environment). Destroying EKS alone does not remove retained EBS volumes, manual RDS snapshots, or the RDS final snapshot, and those keep billing until you delete them.
+> Set up an AWS Budget before deploying. When finished, follow [Destroying the environment](#destroying-the-environment) and verify that resources were actually removed. `terraform destroy` does not necessarily remove manually created resources, retained storage, or snapshots.
+>
+> **Data retention:** This project uses manual RDS snapshots. They remain in your account after the database is destroyed and may continue to incur storage charges. Keep a snapshot if you need the data; delete it only after confirming it is no longer required.
 
 ## Table of contents
 
@@ -287,7 +289,9 @@ This section is for operators who accept the costs above. Plan for a few hours o
 
 ### What gets created
 
-Terraform (`terraform/environments/production`) creates: a VPC with 2 public and 2 private subnets and 2 NAT gateways, an EKS cluster `taskflow-production` (2 to 3 `c7i-flex.large` nodes), RDS PostgreSQL 17 `taskflow-production-db` (private, encrypted, deletion-protected), the AWS Load Balancer Controller, Argo CD, External Secrets Operator, a Route 53 zone, an ACM wildcard certificate, and empty AWS Secrets Manager secrets. Argo CD then deploys everything under `k8s/`.
+Terraform (`terraform/environments/production`) creates: a VPC with 2 public and 2 private subnets and 2 NAT gateways, an EKS cluster `taskflow-production` (2 to 3 `c7i-flex.large` nodes), RDS PostgreSQL 17 `taskflow-production-db` (private, encrypted, deletion-protected), the AWS Load Balancer Controller, Argo CD, External Secrets Operator, a Route 53 hosted zone, a request for an ACM wildcard certificate, and empty AWS Secrets Manager secrets. Argo CD then deploys everything under `k8s/`.
+
+Two parts of the DNS setup are **not** automatic. Creating the Route 53 hosted zone does not delegate your domain to it: you must add NS records at your DNS provider. The ACM certificate is only issued after DNS validation succeeds, and you must add the validation record yourself. Both are covered in [Step 4](#step-4-delegate-dns-and-validate-the-certificate).
 
 ### Prerequisites
 
@@ -305,17 +309,34 @@ aws sts get-caller-identity          # confirm this is the intended account
 
 ### Step 0: Replace the hardcoded values
 
-Search and replace before the first `terraform apply`:
+Before the first `terraform apply`, review every account-specific value. Do not copy the author's AWS identifiers, IP address, domain, or repository settings into your own deployment.
 
-| What | Where | Change to |
+| Setting | Location | Required action |
 |---|---|---|
-| Terraform state bucket | `terraform/environments/production/versions.tf` | a bucket you own |
-| EKS API allowed IP (`49.36.203.4/32`) | `terraform/modules/eks/main.tf` (`public_access_cidrs`) | your public IP as `x.x.x.x/32`, otherwise `kubectl` and the Helm provider cannot reach the cluster |
-| Domain `aws.zahaan.online` | `terraform/environments/production/main.tf` (route53, acm), `k8s/infrastructure/gateway/gateway.yaml`, `k8s/applications/taskflow/gateway/httproute.yaml`, `k8s/applications/argocd/httproute.yaml`, optionally the `CORS_ALLOWED_ORIGINS` default in `application.properties` and the k6 default URL | your subdomain |
-| ACM certificate ARN (contains the author's AWS account ID) | `k8s/infrastructure/gateway/loadbalancerconfiguration.yaml` | your certificate ARN, available after Step 2 (see Step 4) |
-| ALB DNS name | `alb_dns_name` in `terraform/environments/production/main.tf` | your ALB's DNS name, available only after the Gateway creates the ALB (see Step 8) |
-| Image names `ghcr.io/zahaanmahajan/...` | `.github/workflows/taskflow.yaml`, both `deployment.yaml` files under `k8s/applications/taskflow/` | your GitHub user or org, in lowercase |
-| Git repo URL `git@github.com:zahaanmahajan/taskflow.git` | `argocd/taskflow.yaml`, `k8s/applications/observability/application.yaml` | your repository |
+| Terraform state bucket | `terraform/environments/production/versions.tf` | Create a globally unique S3 bucket that you own. Use the same bucket name in the backend configuration. |
+| AWS region | Terraform configuration, manifests and commands | Choose a region and ensure all resources and commands use it consistently. This README uses `ap-south-1`. |
+| EKS API allow-list | `terraform/modules/eks/main.tf` (`public_access_cidrs`) | Replace the example IP with your current public IP in CIDR notation, such as `x.x.x.x/32`. Restrict access to trusted addresses. Otherwise `kubectl` and the Helm provider cannot reach the cluster. |
+| Domain and DNS zone | `terraform/environments/production/main.tf`, `k8s/infrastructure/gateway/gateway.yaml`, application `httproute.yaml` files | Replace `aws.zahaan.online` and related hostnames with a subdomain you control. Check every DNS, certificate and hostname reference. |
+| ACM certificate ARN | `k8s/infrastructure/gateway/loadbalancerconfiguration.yaml` | Use the certificate ARN created in your AWS account, in the same region as the ALB. It is available after Step 2 (see Step 4). |
+| ALB DNS name | `alb_dns_name` in `terraform/environments/production/main.tf` | Set this only after the Gateway has provisioned your ALB (see Step 8). Do not retain the author's ALB hostname. |
+| Container image names | `.github/workflows/taskflow.yaml` and the frontend/backend `deployment.yaml` files | Replace `ghcr.io/zahaanmahajan/...` with your lowercase GitHub username or organization and the correct package names. |
+| Git repository URLs | `argocd/taskflow.yaml`, `k8s/applications/observability/application.yaml`, and relevant secret values | Replace the author's repository URL with your own. Use a deploy key or other appropriately scoped credentials. |
+| AWS credentials and profile | Local AWS CLI configuration | Configure your own IAM identity. Do not commit credentials, access keys, state files, or secret values. |
+
+The domain also appears in the `CORS_ALLOWED_ORIGINS` default in `application.properties` and in the k6 default URL; update those too if you want them to match your deployment.
+
+Search for remaining references before deploying:
+
+```bash
+grep -RInE 'zahaan\.online|zahaanmahajan|49\.36\.203\.4|372951851996' \
+  terraform k8s argocd .github
+```
+
+Review each result. Replace values that belong to the original author's environment; do not blindly replace unrelated text.
+
+After customization, commit and push the changes to your repository's `main` branch before bootstrapping Argo CD.
+
+> **Important:** The `alb_dns_name` value is a deployment dependency, not a value you can know before the ALB exists. Keep it as is for now and update it after Step 8, as described there.
 
 ### Step 1: Create the Terraform state bucket
 
@@ -346,6 +367,10 @@ aws s3api get-public-access-block --bucket "$BUCKET"   # all four values true
 aws s3api get-bucket-encryption   --bucket "$BUCKET"
 aws s3api get-bucket-versioning   --bucket "$BUCKET"   # Status: Enabled
 ```
+
+**State bucket lifecycle:** The S3 backend is created separately from the infrastructure managed by this Terraform root module. Destroying the environment does not necessarily delete the bucket. Keep it while you may need to inspect state, recover infrastructure, or recreate the environment. Do not delete the bucket just to resolve a Terraform error.
+
+If you eventually decide to remove it, first confirm that the environment has been destroyed, no recovery is required, and the bucket contains no state you need. If versioning is enabled, deleting the current objects is not sufficient to remove previous object versions; account for those versions before deleting the bucket.
 
 ### Step 2: Apply Terraform
 
@@ -634,20 +659,210 @@ Only the **backend** has a Horizontal Pod Autoscaler: 2 to 5 replicas at 60% ave
   ```
 
 - **Restore:** restoring a snapshot creates a **new** RDS instance and does not touch the original. Use the same DB subnet group and security group, keep it private, verify the `taskflow` database and `public.todos` table, then update `DB_URL` in the `taskflow/production/database` secret to switch the application over. External Secrets refreshes hourly, so restart the backend pods to pick it up sooner.
-- Safeguards in place: storage encryption, deletion protection, and a required final snapshot named `taskflow-production-db-final-snapshot` when the instance is destroyed. That fixed name fails if a snapshot with the same name already exists; delete the old one or change the identifier first.
+- **Deletion protection and snapshots:** RDS storage is encrypted, and deletion protection is enabled during normal operation. Before destroying the database, deliberately disable deletion protection and verify that the final-snapshot identifier is available. Terraform is configured to create a final snapshot named `taskflow-production-db-final-snapshot`; a name collision can cause deletion to fail.
+- **Manual snapshots are independent resources:** `scripts/rds-manual-backup.sh` creates snapshots named `taskflow-production-db-manual-<UTC timestamp>`. They survive database deletion and must be managed separately. Retain at least one verified snapshot if you need database recovery, and account for its ongoing storage cost.
 
 Disaster-recovery order of operations: confirm the Terraform state bucket and AWS access, restore RDS to a new instance, recover VPC/EKS/IAM through Terraform, recover External Secrets and Argo CD, let Argo CD sync from Git, point `DB_URL` at the restored database, verify the app and monitoring, and record what happened.
 
 ## Destroying the environment
 
-Order matters, otherwise Terraform gets stuck on resources it did not create.
+Destroying this environment can delete the database and application infrastructure. **Back up and verify any data you need before proceeding.** The commands below assume that you intend to remove the TaskFlow deployment from the configured AWS account and region.
 
-1. Delete the Argo CD applications (or the Gateway and HTTPRoutes) so the AWS Load Balancer Controller removes the ALB and its target groups. Without this, VPC deletion fails.
-2. Delete the persistent volumes left by Prometheus and Grafana. The `gp3` StorageClass uses `reclaimPolicy: Retain`, so EBS volumes remain and keep billing until you delete them.
-3. RDS has deletion protection enabled. To destroy it deliberately, disable it first, make sure the final-snapshot name is unused, and review the plan.
-4. Run `terraform -chdir=terraform/environments/production destroy`.
-5. Delete what Terraform does not remove: manual RDS snapshots (`taskflow-production-db-manual-*`), the final snapshot (`taskflow-production-db-final-snapshot`), any leftover EBS volumes, and finally the state bucket and the Secrets Manager secrets if scheduled deletion has not already removed them. Keep the final snapshot only if you want the data.
-6. Check the **Billing console** the next day to confirm charges have stopped.
+`terraform destroy` alone does not reliably remove everything. The AWS Load Balancer Controller creates AWS resources (the ALB, target groups and security groups) in response to Kubernetes Gateway API objects, and Terraform does not know about them. If the controller or its Kubernetes resources disappear before those AWS resources are cleaned up, Terraform may be unable to delete the VPC. Kubernetes finalizers can also block deletion. Follow the order below.
+
+### 1. Confirm the account and review the database backup
+
+Run these commands from a terminal configured for the intended AWS account:
+
+```bash
+aws sts get-caller-identity
+aws eks list-clusters --region ap-south-1
+aws rds describe-db-instances --region ap-south-1 \
+  --query 'DBInstances[].{ID:DBInstanceIdentifier,DeletionProtection:DeletionProtection}' \
+  --output table
+```
+
+Create a manual database snapshot if you need to preserve the current data:
+
+```bash
+./scripts/rds-manual-backup.sh
+```
+
+Wait for the snapshot to reach `available` before continuing. Do not proceed if the data is important and you have not verified the backup.
+
+### 2. Remove Kubernetes-managed application resources while the cluster is working
+
+Use the existing cluster credentials:
+
+```bash
+aws eks update-kubeconfig \
+  --name taskflow-production \
+  --region ap-south-1
+
+kubectl get applications -n argocd
+kubectl get gateway,httproute -A
+kubectl get pvc -A
+```
+
+Delete the Argo CD applications and/or Gateway and HTTPRoute resources through the configured GitOps workflow or Kubernetes, as appropriate for your deployment. Wait for the AWS Load Balancer Controller to remove the ALB and its target groups before destroying the cluster.
+
+Check the load balancers:
+
+```bash
+aws elbv2 describe-load-balancers \
+  --region ap-south-1 \
+  --query 'LoadBalancers[].[LoadBalancerName,LoadBalancerArn,VpcId]' \
+  --output table
+```
+
+Identify resources belonging to the TaskFlow VPC. Do not delete load balancers or target groups belonging to other applications or VPCs.
+
+### 3. Check persistent storage
+
+The `gp3` StorageClass uses `reclaimPolicy: Retain`. Inspect persistent volumes and claims before deleting the cluster:
+
+```bash
+kubectl get pv
+kubectl get pvc -A
+```
+
+If you no longer need Prometheus or Grafana data, delete the relevant claims and then identify any remaining EBS volumes. A retained volume can outlive its Kubernetes claim and continue to incur charges.
+
+### 4. Prepare RDS for intentional deletion
+
+Check the final-snapshot identifier before destroying the database:
+
+```bash
+aws rds describe-db-snapshots \
+  --region ap-south-1 \
+  --db-snapshot-identifier taskflow-production-db-final-snapshot
+```
+
+If a snapshot with this name already exists, preserve it if required and change the Terraform final-snapshot identifier to an unused name before proceeding.
+
+If RDS deletion protection is enabled, disable it deliberately:
+
+```bash
+aws rds modify-db-instance \
+  --region ap-south-1 \
+  --db-instance-identifier taskflow-production-db \
+  --no-deletion-protection \
+  --apply-immediately
+```
+
+Wait until the change is reflected in `describe-db-instances`. Review the Terraform configuration and plan to confirm that database deletion and final-snapshot creation are intended.
+
+### 5. Review and run Terraform destroy
+
+From the repository root:
+
+```bash
+terraform -chdir=terraform/environments/production plan -destroy
+```
+
+Read the complete plan. Confirm the AWS account, region, resources to be deleted, and any database snapshot implications before proceeding.
+
+Then run:
+
+```bash
+terraform -chdir=terraform/environments/production destroy
+```
+
+If destroy fails, **do not repeatedly rerun it without inspecting the error**. Fix the reported dependency or lifecycle issue and run `plan -destroy` again.
+
+### 6. Recover from stuck AWS or Kubernetes dependencies
+
+If Terraform cannot delete the VPC because of a dependency:
+
+1. Check whether any ALB or target group still exists in the TaskFlow VPC.
+2. Check for network interfaces, NAT gateways, VPC endpoints, subnets, security groups, or other VPC dependencies.
+3. If Kubernetes objects are stuck terminating, inspect their finalizers and the associated AWS resources before modifying them.
+4. If the controller has already been removed, it may no longer be able to clean up AWS resources for you.
+
+For example, list load balancers, target groups, network interfaces and security groups in the relevant VPC:
+
+```bash
+aws elbv2 describe-load-balancers \
+  --region ap-south-1 \
+  --query 'LoadBalancers[].[LoadBalancerName,LoadBalancerArn,VpcId]' \
+  --output table
+
+aws elbv2 describe-target-groups \
+  --region ap-south-1 \
+  --query 'TargetGroups[].[TargetGroupName,TargetGroupArn,VpcId,LoadBalancerArns]' \
+  --output table
+
+aws ec2 describe-network-interfaces \
+  --region ap-south-1 \
+  --filters Name=vpc-id,Values=<TASKFLOW_VPC_ID> \
+  --query 'NetworkInterfaces[].[NetworkInterfaceId,Status,Description,Groups[].GroupId]' \
+  --output table
+
+aws ec2 describe-security-groups \
+  --region ap-south-1 \
+  --filters Name=vpc-id,Values=<TASKFLOW_VPC_ID> \
+  --query 'SecurityGroups[].[GroupId,GroupName]' \
+  --output table
+```
+
+Replace `<TASKFLOW_VPC_ID>` with the VPC ID from your own deployment. Delete an orphaned resource manually only after confirming that it belongs to this environment, is no longer in use, and has no remaining dependencies. Re-run Terraform destroy after resolving the blocker.
+
+If a Kubernetes object is stuck terminating, inspect it first:
+
+```bash
+kubectl describe <RESOURCE_TYPE> <RESOURCE_NAME> -n <NAMESPACE>
+kubectl get <RESOURCE_TYPE> <RESOURCE_NAME> -n <NAMESPACE> -o yaml
+```
+
+Finalizers should be removed only as a last resort, after the associated cleanup has been completed or the associated external resource has been verified as absent. Removing finalizers prematurely can leave orphaned AWS resources.
+
+### 7. Verify the final state
+
+Terraform reporting success is not sufficient by itself. Verify that the cluster, database instance and VPC are gone:
+
+```bash
+aws eks list-clusters --region ap-south-1
+
+aws rds describe-db-instances \
+  --region ap-south-1 \
+  --query 'DBInstances[].DBInstanceIdentifier' \
+  --output table
+
+aws ec2 describe-vpcs \
+  --region ap-south-1 \
+  --filters Name=vpc-id,Values=<TASKFLOW_VPC_ID> \
+  --query 'Vpcs[].VpcId' \
+  --output table
+```
+
+Empty results for the TaskFlow resources are expected. Check for remaining resources that may still incur charges:
+
+- RDS manual and final snapshots
+- EBS volumes and snapshots
+- Unassociated Elastic IP addresses
+- Load balancers and target groups
+- NAT gateways and other resources in the TaskFlow VPC
+- Secrets Manager secrets and pending secret deletions
+- ACM certificates and Route 53 records or hosted zones
+
+For example, list Elastic IP allocations in the region:
+
+```bash
+aws ec2 describe-addresses \
+  --region ap-south-1 \
+  --query 'Addresses[].[AllocationId,PublicIp,AssociationId,NetworkInterfaceId]' \
+  --output table
+```
+
+Do not release an address unless you have confirmed it is unused and no longer needed.
+
+### 8. Decide what to retain
+
+Keep the encrypted manual RDS snapshot if you need the data. Remove snapshots, EBS resources, secrets, DNS records, certificates and other resources only after confirming they are no longer required. Deleting a Route 53 hosted zone or domain is not required merely to stop the TaskFlow compute environment.
+
+Keep the Terraform state bucket if you need the state for audit, recovery or future redeployment. If you permanently remove it, account for all object versions and delete it only after confirming that no recovery is needed.
+
+Finally, check AWS Billing and Cost Explorer after cleanup. Some charges and billing data may take time to update.
 
 ## Troubleshooting
 
@@ -661,6 +876,7 @@ Order matters, otherwise Terraform gets stuck on resources it did not create.
 | `terraform init` fails on the backend | State bucket missing or no access. Check `aws sts get-caller-identity` and the bucket name. Never delete or recreate the bucket to "fix" it |
 | `kubectl` or Terraform cannot reach the cluster | Your IP is not in the EKS `public_access_cidrs` |
 | Terraform plan shows RDS, EKS or VPC replacement | Stop. Investigate before applying, as this can cause data loss or downtime |
+| `terraform destroy` fails deleting the VPC or subnets | Leftover ALB, target groups, network interfaces or security groups created by the Load Balancer Controller. See [Destroying the environment](#destroying-the-environment), step 6 |
 | Pod `ImagePullBackOff` | Missing or expired GHCR token. `kubectl describe pod`, then check the `taskflow-ghcr` ExternalSecret and the `taskflow/production/ghcr` secret |
 | Pod `CrashLoopBackOff` | `kubectl logs <pod> -n taskflow --previous`. Usually wrong `DB_URL` or password in the database secret |
 | ExternalSecret not `SecretSynced` | `kubectl describe externalsecret -n <ns> <name>`. Secret value not set, wrong secret ID, or missing Pod Identity permissions |
